@@ -1,11 +1,17 @@
 # LLM配置
 llm:
-  model: "gpt-4o-mini"
+  model: "gpt-4o-mini"  # 推荐使用gpt-4o-mini，价格便宜且性能好
   temperature: 0.7
-  samples_per_iteration: 5
+  samples_per_iteration: 3  # 减少采样数量以节省费用和时间
   max_iterations: 3
-  api_key: "sk-eM1CKOeVcmjqjIA7jZiRyMDXq1PwQo5i9Vi08njyxEicKcPt" 
-  base_url: "https://api.chatanywhere.tech/v1"
+  api_key: "sk-eM1CKOeVcmjqjIA7jZiRyMDXq1PwQo5i9Vi08njyxEicKcPt"
+  base_url: "https://api.chatanywhere.tech/v1"  # 确保正确的base_url
+
+  # 新增配置项
+  max_retries: 3
+  timeout: 30
+  retry_delay: 2
+  enable_fallback: true  # 启用默认函数回退
 
 # 环境配置
 env:
@@ -35,13 +41,20 @@ agent:
 
 # 训练配置
 training:
-  num_iterations: 5
-  episodes_per_sample: 1000
+  num_iterations: 3  # 减少迭代次数进行快速测试
+  episodes_per_sample: 200  # 减少episode数量
   batch_size: 32
   update_frequency: 10
-  
+
 # 评估配置
 evaluation:
-  num_episodes: 100
+  num_episodes: 50  # 减少评估episode数量
   render: false
   save_frequency: 10
+
+# 调试配置
+debug:
+  log_level: "INFO"
+  test_api_on_startup: true
+  use_fallback_on_failure: true
+  save_generated_functions: true

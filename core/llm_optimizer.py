@@ -1,115 +1,251 @@
-from openai import OpenAI
 import json
 import numpy as np
 import re
+import time
+import logging
+import requests
 from typing import Dict, List, Tuple, Optional
+
+# 尝试导入OpenAI，如果失败则使用requests作为备选
+try:
+    from openai import OpenAI
+
+    OPENAI_AVAILABLE = True
+except ImportError:
+    OPENAI_AVAILABLE = False
+    print("Warning: OpenAI库未安装，将使用requests库")
 
 
 class LLMOptimizer:
     def __init__(self, api_key: str, base_url: str, model: str = "gpt-4o-mini"):
-        try:
-            # 简化的客户端初始化，只传递必要参数
-            self.client = OpenAI(
-                api_key=api_key,
-                base_url=base_url,
-                timeout=60.0  # 设置超时
-            )
-        except Exception as e:
-            print(f"OpenAI客户端初始化失败: {e}")
-            print("尝试使用最小配置...")
-            # 备用初始化方式
-            try:
-                self.client = OpenAI(api_key=api_key)
-            except Exception as e2:
-                print(f"备用初始化也失败: {e2}")
-                self.client = None
-
-        self.model = model
-        self.base_url = base_url
         self.api_key = api_key
+        self.base_url = base_url.rstrip('/')  # 移除末尾的斜杠
+        self.model = model
         self.iteration_history = []
         self.best_functions = {}
 
-    def _test_connection(self):
-        """测试API连接"""
+        # 设置日志
+        logging.basicConfig(level=logging.INFO)
+        self.logger = logging.getLogger(__name__)
+
+        # 初始化客户端
+        self.client = None
+        self.use_requests = False
+        self._init_client()
+
+    def _init_client(self):
+        """初始化API客户端"""
+        # 首先尝试使用requests库（因为测试显示它能正常工作）
+        if self._test_requests_connection():
+            self.logger.info("使用requests库进行API调用")
+            self.use_requests = True
+            return True
+
+        # 如果requests失败，尝试OpenAI客户端
+        if OPENAI_AVAILABLE:
+            try:
+                # 简化的OpenAI客户端初始化，只使用必要参数
+                self.client = OpenAI(
+                    api_key=self.api_key,
+                    base_url=self.base_url
+                )
+
+                # 测试连接
+                if self._test_openai_connection():
+                    self.logger.info("使用OpenAI客户端进行API调用")
+                    return True
+                else:
+                    self.client = None
+
+            except Exception as e:
+                self.logger.error(f"OpenAI客户端初始化失败: {e}")
+                self.client = None
+
+        # 如果都失败，记录警告
+        self.logger.warning("所有API连接方式都失败，将使用默认函数")
+        return False
+
+    def _test_requests_connection(self):
+        """测试requests连接"""
+        try:
+            headers = {
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/json"
+            }
+
+            data = {
+                "model": self.model,
+                "messages": [{"role": "user", "content": "test"}],
+                "max_tokens": 5
+            }
+
+            response = requests.post(
+                f"{self.base_url}/chat/completions",
+                headers=headers,
+                json=data,
+                timeout=10
+            )
+
+            return response.status_code == 200
+
+        except Exception as e:
+            self.logger.error(f"Requests连接测试失败: {e}")
+            return False
+
+    def _test_openai_connection(self):
+        """测试OpenAI客户端连接"""
         try:
             if self.client is None:
                 return False
-            # 发送一个简单的测试请求
+
             response = self.client.chat.completions.create(
                 model=self.model,
-                messages=[{"role": "user", "content": "Hello"}],
+                messages=[{"role": "user", "content": "test"}],
                 max_tokens=5
             )
+
             return True
+
         except Exception as e:
-            print(f"API连接测试失败: {e}")
+            self.logger.error(f"OpenAI客户端连接测试失败: {e}")
             return False
+
+    def _make_request_with_requests(self, messages: List[Dict], max_retries: int = 3):
+        """使用requests库进行API调用"""
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json"
+        }
+
+        data = {
+            "model": self.model,
+            "messages": messages,
+            "temperature": 0.7,
+            "max_tokens": 2000
+        }
+
+        for attempt in range(max_retries):
+            try:
+                response = requests.post(
+                    f"{self.base_url}/chat/completions",
+                    headers=headers,
+                    json=data,
+                    timeout=30
+                )
+
+                if response.status_code == 200:
+                    result = response.json()
+                    content = result['choices'][0]['message']['content']
+                    if content:
+                        return content
+                    else:
+                        raise ValueError("API返回空内容")
+                else:
+                    raise Exception(f"API返回错误状态码: {response.status_code}, 内容: {response.text}")
+
+            except Exception as e:
+                self.logger.warning(f"Requests API调用失败 (尝试 {attempt + 1}/{max_retries}): {e}")
+
+                if attempt < max_retries - 1:
+                    wait_time = (attempt + 1) * 2
+                    self.logger.info(f"等待 {wait_time} 秒后重试...")
+                    time.sleep(wait_time)
+                else:
+                    raise
+
+    def _make_request_with_openai(self, messages: List[Dict], max_retries: int = 3):
+        """使用OpenAI客户端进行API调用"""
+        if self.client is None:
+            raise Exception("OpenAI客户端未初始化")
+
+        for attempt in range(max_retries):
+            try:
+                response = self.client.chat.completions.create(
+                    model=self.model,
+                    messages=messages,
+                    temperature=0.7,
+                    max_tokens=2000
+                )
+
+                content = response.choices[0].message.content
+                if content:
+                    return content
+                else:
+                    raise ValueError("API返回空内容")
+
+            except Exception as e:
+                self.logger.warning(f"OpenAI API调用失败 (尝试 {attempt + 1}/{max_retries}): {e}")
+
+                if attempt < max_retries - 1:
+                    wait_time = (attempt + 1) * 2
+                    self.logger.info(f"等待 {wait_time} 秒后重试...")
+                    time.sleep(wait_time)
+                else:
+                    raise
+
+    def _make_request(self, messages: List[Dict]):
+        """智能选择API调用方式"""
+        if self.use_requests:
+            return self._make_request_with_requests(messages)
+        elif self.client is not None:
+            return self._make_request_with_openai(messages)
+        else:
+            raise Exception("没有可用的API连接方式")
 
     def generate_state_representation(self,
                                       task_description: str,
                                       state_info: Dict) -> str:
         """生成状态表示函数"""
-        # 如果客户端未初始化，直接返回默认函数
-        if self.client is None:
-            print("OpenAI客户端未初始化，使用默认状态函数")
+        # 如果没有可用的API连接，直接返回默认函数
+        if not self.use_requests and self.client is None:
+            self.logger.warning("API不可用，使用默认状态函数")
             return self._get_default_state_function()
 
         prompt = self._create_state_prompt(task_description, state_info)
+        messages = [{"role": "user", "content": prompt}]
 
         try:
-            response = self.client.chat.completions.create(
-                model=self.model,
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.7,
-                max_tokens=2000,
-                timeout=30.0
-            )
-
-            # 提取响应内容
-            content = response.choices[0].message.content
-            if not content:
-                raise ValueError("No content in the response.")
-
+            content = self._make_request(messages)
             code = self._extract_code(content)
-            return code if code else self._get_default_state_function()
+
+            if code:
+                self.logger.info("成功生成状态表示函数")
+                return code
+            else:
+                self.logger.warning("未能从响应中提取代码，使用默认函数")
+                return self._get_default_state_function()
 
         except Exception as e:
-            print(f"Error generating state representation: {e}")
-            print("使用默认状态表示函数")
+            self.logger.error(f"生成状态表示函数失败: {e}")
+            self.logger.info("使用默认状态表示函数")
             return self._get_default_state_function()
 
     def generate_intrinsic_reward(self,
                                   state_representation: str,
                                   performance_feedback: Dict = None) -> str:
         """生成内在奖励函数"""
-        # 如果客户端未初始化，直接返回默认函数
-        if self.client is None:
-            print("OpenAI客户端未初始化，使用默认奖励函数")
+        # 如果没有可用的API连接，直接返回默认函数
+        if not self.use_requests and self.client is None:
+            self.logger.warning("API不可用，使用默认奖励函数")
             return self._get_default_reward_function()
 
         prompt = self._create_reward_prompt(state_representation, performance_feedback)
+        messages = [{"role": "user", "content": prompt}]
 
         try:
-            response = self.client.chat.completions.create(
-                model=self.model,
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.7,
-                max_tokens=1500,
-                timeout=30.0
-            )
-
-            # 提取响应内容
-            content = response.choices[0].message.content
-            if not content:
-                raise ValueError("No content in the response.")
-
+            content = self._make_request(messages)
             code = self._extract_code(content)
-            return code if code else self._get_default_reward_function()
+
+            if code:
+                self.logger.info("成功生成内在奖励函数")
+                return code
+            else:
+                self.logger.warning("未能从响应中提取代码，使用默认函数")
+                return self._get_default_reward_function()
 
         except Exception as e:
-            print(f"Error generating intrinsic reward: {e}")
-            print("使用默认奖励函数")
+            self.logger.error(f"生成内在奖励函数失败: {e}")
+            self.logger.info("使用默认奖励函数")
             return self._get_default_reward_function()
 
     def update_with_feedback(self, feedback: Dict):
@@ -240,13 +376,14 @@ def intrinsic_reward(state, action, next_state, sold_item, price):
 3. 计算预期的未来价值
 4. 评估库存分布的均衡性
 
-要求返回一个包含原始状态和新增特征的numpy数组。
+要求：
+- 函数名必须是 enhance_state
+- 输入参数: inventory, customer_type, prices, time_remaining, initial_inventory
+- 返回 numpy.ndarray
+- 处理边界情况，避免除零错误
+- 确保所有特征都是有意义的数值
 
-请生成一个创新的状态增强函数，确保：
-- 函数逻辑正确，避免除零错误
-- 包含有意义的特征工程
-- 返回numpy数组格式
-- 处理边界情况
+请生成一个创新的状态增强函数。
 """
         return prompt
 
@@ -269,10 +406,26 @@ def intrinsic_reward(state, action, next_state, sold_item, price):
 4. 考虑时间压力因素
 5. 提供稳定的学习信号
 
-请生成一个平衡且有效的内在奖励函数，确保：
-- 数值稳定
-- 逻辑清晰
-- 避免异常情况
+要求：
+- 函数名必须是 intrinsic_reward
+- 输入参数: state, action, next_state, sold_item, price
+- 返回 float 数值
+- 数值稳定，避免异常情况
 - 提供有意义的学习信号
+
+请生成一个平衡且有效的内在奖励函数。
 """
         return prompt
+
+    def is_api_available(self):
+        """检查API是否可用"""
+        return self.use_requests or self.client is not None
+
+    def get_connection_status(self):
+        """获取连接状态信息"""
+        if self.use_requests:
+            return "使用requests库连接"
+        elif self.client is not None:
+            return "使用OpenAI客户端连接"
+        else:
+            return "无可用连接，使用默认函数"
