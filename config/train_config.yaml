@@ -1,0 +1,45 @@
+# LLM配置
+llm:
+  model: "gpt-4-1106-preview"
+  temperature: 0.7
+  samples_per_iteration: 5
+  max_iterations: 3
+
+# 环境配置
+env:
+  num_products: 10
+  num_customer_types: 4
+  initial_inventory: 10
+  cardinality: 4
+  max_time: 100
+
+# 任务描述
+task:
+  description: |
+    优化在线商品推荐策略，目标是最大化销售收入，同时保持库存平衡。
+    需要考虑：
+    1. 不同客户类型的偏好差异
+    2. 库存水平的动态变化
+    3. 商品展示数量限制
+    4. 长期收益与短期收益的平衡
+
+# 智能体配置
+agent:
+  algorithm: "A2C"
+  hidden_dim: 256
+  learning_rate: 0.001
+  discount_factor: 0.99
+  entropy_weight: 0.01
+
+# 训练配置
+training:
+  num_iterations: 5
+  episodes_per_sample: 1000
+  batch_size: 32
+  update_frequency: 10
+  
+# 评估配置
+evaluation:
+  num_episodes: 100
+  render: false
+  save_frequency: 10
