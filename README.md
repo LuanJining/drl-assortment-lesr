@@ -360,9 +360,9 @@ flake8 .
 
 ## 📞 联系方式
 
-- 作者：[你的姓名]
-- 邮箱：your.email@example.com
-- 项目链接：[https://github.com/your-username/drl-assortment-lesr](https://github.com/your-username/drl-assortment-lesr)
+- 作者：栾吉宁
+- 邮箱：luanjining@163.com
+- 项目链接：[https://github.com/your-username/drl-assortment-lesr](https://github.com/LuanJining/drl-assortment-lesr)
 
 ## 🙏 致谢
 
