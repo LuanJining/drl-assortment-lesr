@@ -50,7 +50,9 @@ DRL-Assortment-LESR 是一个端到端的强化学习系统，专门解决电商
 2. **创建虚拟环境**
    ```bash
    python -m venv .venv
-   source .venv/bin/activate  # Windows: .venv\Scripts\activate
+   source .venv/bin/activate
+   # Windows:
+   .venv\Scripts\activate
    ```
 
 3. **安装依赖**
