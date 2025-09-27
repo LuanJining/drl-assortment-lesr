@@ -19,6 +19,7 @@ class LLMOptimizer:
         prompt = self._create_state_prompt(task_description, state_info)
         
         try:
+            openai.api_base = "https://api.chatanywhere.tech/v1"
             response = openai.ChatCompletion.create(
                 model=self.model,
                 messages=[{"role": "user", "content": prompt}],
