@@ -1,0 +1,39 @@
+# 环境配置文件
+environment:
+  name: "AssortmentEnvironment"
+  version: "1.0"
+  
+  # 产品配置
+  products:
+    num_products: 10
+    price_range: [1.0, 5.0]
+    features_dim: 5
+    
+  # 客户配置
+  customers:
+    num_types: 4
+    arrival_distribution: "uniform"  # uniform, poisson, custom
+    preference_type: "dirichlet"  # dirichlet, uniform, clustered
+    
+  # 库存配置
+  inventory:
+    initial_total: 100
+    distribution: "uniform"  # uniform, skewed, normal
+    min_per_product: 1
+    
+  # 约束配置
+  constraints:
+    cardinality: 4  # 最大展示数量
+    max_time: 100   # 最大时间步
+    
+  # 随机性配置
+  stochasticity:
+    purchase_noise: 0.1
+    arrival_noise: 0.05
+    
+# 奖励配置
+reward:
+  sale_weight: 1.0
+  stockout_penalty: -0.5
+  balance_bonus: 0.1
+  time_discount: 0.99

@@ -1,0 +1,58 @@
+# LLM提示模板配置
+prompts:
+  state_generation:
+    system: |
+      你是一个强化学习专家，擅长设计状态表示函数。
+      你的任务是生成Python函数来增强原始状态表示，使其更适合强化学习训练。
+    
+    user_template: |
+      任务: {task_description}
+      
+      环境信息:
+      - 产品数量: {num_products}
+      - 客户类型: {num_customer_types}
+      - 展示限制: {cardinality}
+      
+      要求:
+      1. 函数名必须是 enhance_state
+      2. 输入参数: inventory, customer_type, prices, time_remaining, initial_inventory
+      3. 返回 numpy.ndarray
+      4. 添加有意义的特征
+      
+      示例特征:
+      - 库存压力指标
+      - 库存不平衡度
+      - 时间衰减因子
+      - 价格敏感度
+  
+  reward_generation:
+    system: |
+      你是一个强化学习专家，擅长设计奖励函数。
+      基于给定的状态表示，设计合适的内在奖励函数。
+    
+    user_template: |
+      状态表示函数:
+      {state_function}
+      
+      性能反馈:
+      {performance_feedback}
+      
+      要求:
+      1. 函数名必须是 intrinsic_reward
+      2. 考虑多个目标的平衡
+      3. 避免稀疏奖励问题
+      4. 鼓励探索
+      
+  analysis:
+    system: |
+      分析强化学习训练结果，提供改进建议。
+    
+    user_template: |
+      训练结果:
+      {results}
+      
+      请分析:
+      1. 哪些特征最重要？
+      2. 性能瓶颈在哪里？
+      3. 如何改进状态表示？
+      4. 如何优化奖励函数？
