@@ -8,22 +8,21 @@ matplotlib==3.7.1
 # 强化学习
 gymnasium==0.29.1
 
-# LLM相关 - 确保版本兼容
+# LLM相关
 openai>=1.3.0,<2.0.0
 httpx>=0.24.0,<1.0.0
 requests>=2.28.0
 
-# 优化求解器
-cvxpy==1.3.1
+# 机器学习和可视化
+scikit-learn>=1.0.0
+seaborn>=0.11.0
+plotly>=5.0.0
 
-# 进程管理
+# 其他依赖
+cvxpy==1.3.1
 libtmux==0.25.0
 psutil==5.9.6
-
-# 日志和可视化
 tensorboard==2.13.0
 tqdm==4.66.3
 pyyaml~=6.0.3
-
-# 额外依赖
 typing-extensions>=4.0.0

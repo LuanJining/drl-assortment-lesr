@@ -258,7 +258,7 @@ class LLMOptimizer:
             return ""
 
         # 查找代码块
-        code_pattern = r'```python\n(.*?)```'
+        code_pattern = r'```python\nfrom core.json_utils import safe_json_dumps\n(.*?)```'
         matches = re.findall(code_pattern, response_text, re.DOTALL)
 
         if matches:
@@ -391,7 +391,7 @@ def intrinsic_reward(state, action, next_state, sold_item, price):
         """创建奖励函数生成提示"""
         feedback_str = ""
         if performance_feedback:
-            feedback_str = f"\n性能反馈：{json.dumps(performance_feedback, indent=2, ensure_ascii=False)}"
+            feedback_str = f"\n性能反馈：{safe_json_dumps(performance_feedback, indent=2, ensure_ascii=False)}"
 
         prompt = f"""
 基于以下状态表示函数，设计一个内在奖励函数：

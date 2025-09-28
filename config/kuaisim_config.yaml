@@ -1,0 +1,84 @@
+# config/kuaisim_config.yaml
+kuaisim:
+  # KuaiSim路径配置
+  kuaisim_path: ""  # 修改为实际路径
+
+  # 数据配置
+  data_path: "dataset/Kuairand-Pure/"
+  train_file: "log_session_4_08_to_5_08_Pure.csv"
+  user_meta_file: "user_features_Pure_fillna.csv"
+  item_meta_file: "video_features_basic_Pure_fillna.csv"
+
+  # 环境参数
+  num_products: 50
+  cardinality: 6
+  max_episodes: 100
+  max_steps: 20
+
+  # KuaiSim模型参数
+  max_hist_seq_len: 100
+  user_latent_dim: 32
+  item_latent_dim: 32
+  enc_dim: 64
+  n_ensemble: 2
+  attn_n_head: 4
+  transformer_d_forward: 64
+  transformer_n_layer: 2
+  state_hidden_dims: [128]
+  scorer_hidden_dims: [128, 32]
+  dropout_rate: 0.1
+  l2_coef: 0.01
+
+  # 预训练模型路径（可选）
+  model_path: "output/Kuairand_Pure/env/user_KRMBUserResponse_lr0.0001_reg0.01_nlayer2.model"
+
+# LLM配置
+llm:
+  model: "gpt-4o-mini"
+  temperature: 0.7
+  samples_per_iteration: 2
+  max_iterations: 2
+  api_key: "your-api-key"
+  base_url: "https://api.chatanywhere.tech/v1"
+  max_retries: 3
+  timeout: 30
+  retry_delay: 2
+  enable_fallback: true
+
+# 训练配置
+training:
+  num_iterations: 2
+  episodes_per_sample: 50
+  batch_size: 32
+  update_frequency: 10
+
+# 智能体配置
+agent:
+  algorithm: "A2C"
+  hidden_dim: 256
+  learning_rate: 0.001
+  discount_factor: 0.99
+  entropy_weight: 0.01
+
+# 评估配置
+evaluation:
+  num_episodes: 30
+  render: false
+  save_frequency: 10
+
+# 任务描述
+task:
+  description: |
+    基于KuaiSim用户行为数据优化视频推荐策略，目标是最大化用户参与度和平台收益。
+    需要考虑：
+    1. 用户的历史行为模式
+    2. 视频内容的多样性
+    3. 推荐列表的长度限制
+    4. 长期用户满意度与短期点击率的平衡
+
+# 调试配置
+debug:
+  log_level: "INFO"
+  test_api_on_startup: true
+  use_fallback_on_failure: true
+  save_generated_functions: true
