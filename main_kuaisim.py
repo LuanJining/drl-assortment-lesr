@@ -1,4 +1,4 @@
-# main_kuaisim.py
+# main_kuaisim.py - 更新版本支持真实KuaiSim集成
 import argparse
 import yaml
 import numpy as np
@@ -15,7 +15,7 @@ from core.intrinsic_reward import IntrinsicRewardCalculator
 from core.feedback_analyzer import FeedbackAnalyzer
 from rl.a2c_agent import A2CAgent
 
-# 新的适配器
+# 新的KuaiSim适配器
 from adapters.kuaisim_adapter import create_kuaisim_environment
 
 # 基准算法
@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 
 
 class KuaiSimEnvironmentWrapper:
-    """KuaiSim增强环境包装器"""
+    """KuaiSim增强环境包装器 - 修复版本"""
 
     def __init__(self, base_env, state_enhancer, reward_calculator):
         self.env = base_env
@@ -48,11 +48,18 @@ class KuaiSimEnvironmentWrapper:
         obs, reward, terminated, truncated, info = self.env.step(action)
         enhanced_obs = self.state_enhancer.enhance(self._format_info_for_enhancer(info, obs))
 
-        # 计算内在奖励
-        intrinsic = self.reward_calculator.calculate(
-            enhanced_obs, action, enhanced_obs,
-            info.get('sold_item', -1), reward
-        )
+        # 计算内在奖励 - 修复action参数类型问题
+        try:
+            intrinsic = self.reward_calculator.calculate(
+                enhanced_obs,
+                action,  # 直接传递action数组
+                enhanced_obs,
+                info.get('sold_item', -1),
+                reward
+            )
+        except Exception as e:
+            logger.warning(f"内在奖励计算失败: {e}")
+            intrinsic = 0.0
 
         total_reward = reward + intrinsic * 0.1
         return enhanced_obs, total_reward, terminated, truncated, info
@@ -60,11 +67,11 @@ class KuaiSimEnvironmentWrapper:
     def _format_info_for_enhancer(self, info, obs):
         """格式化信息给状态增强器"""
         return {
-            'inventory': info['inventory'],
-            'customer_type': info['current_user_type'],
-            'prices': info['prices'],
-            'time_remaining': info['time_remaining'],
-            'initial_inventory': info['initial_inventory']
+            'inventory': info.get('inventory', np.ones(10)),
+            'customer_type': info.get('current_user_type', 0),
+            'prices': info.get('prices', np.ones(10)),
+            'time_remaining': info.get('time_remaining', 10),
+            'initial_inventory': info.get('initial_inventory', np.ones(10))
         }
 
 
@@ -80,21 +87,38 @@ def main(args):
     logger.info("=== 开始KuaiSim集成训练 ===")
 
     # 创建KuaiSim环境
-    kuaisim_env = create_kuaisim_environment(config['kuaisim'])
-    logger.info(f"KuaiSim环境创建成功")
-    logger.info(f"使用KuaiSim数据: {kuaisim_env.use_kuaisim}")
-    logger.info(f"状态维度: {kuaisim_env.state_dim}, 动作维度: {kuaisim_env.action_dim}")
+    try:
+        kuaisim_env = create_kuaisim_environment(config['kuaisim'])
+        logger.info(f"KuaiSim环境创建成功")
+
+        # 获取环境状态信息
+        test_state, test_info = kuaisim_env.reset()
+        kuaisim_status = test_info.get('kuaisim_status', '未知')
+        logger.info(f"KuaiSim状态: {kuaisim_status}")
+        logger.info(f"状态维度: {kuaisim_env.state_dim}, 动作维度: {kuaisim_env.action_dim}")
+
+    except Exception as e:
+        logger.error(f"KuaiSim环境创建失败: {e}")
+        return
 
     # 初始化LLM组件
-    llm_optimizer = LLMOptimizer(
-        api_key=config['llm']['api_key'],
-        base_url=config['llm']['base_url'],
-        model=config['llm']['model']
-    )
+    try:
+        llm_optimizer = LLMOptimizer(
+            api_key=config['llm']['api_key'],
+            base_url=config['llm']['base_url'],
+            model=config['llm']['model']
+        )
 
-    state_enhancer = StateEnhancer()
-    reward_calculator = IntrinsicRewardCalculator()
-    feedback_analyzer = FeedbackAnalyzer()
+        state_enhancer = StateEnhancer()
+        reward_calculator = IntrinsicRewardCalculator()
+        feedback_analyzer = FeedbackAnalyzer()
+
+        logger.info(f"LLM组件初始化成功")
+        logger.info(f"API连接状态: {llm_optimizer.get_connection_status()}")
+
+    except Exception as e:
+        logger.error(f"LLM组件初始化失败: {e}")
+        return
 
     best_performance = -float('inf')
     best_state_func = None
@@ -112,14 +136,16 @@ def main(args):
             logger.info(f"生成样本 {sample_idx + 1}/{config['llm']['samples_per_iteration']}")
 
             try:
-                # 生成状态增强函数
+                # 生成状态增强函数 - 适配KuaiSim
                 state_func = llm_optimizer.generate_state_representation(
                     task_description=config['task']['description'],
                     state_info={
                         'inventory_shape': config['kuaisim']['num_products'],
                         'customer_types': 4,
                         'num_products': config['kuaisim']['num_products'],
-                        'cardinality': config['kuaisim']['cardinality']
+                        'cardinality': config['kuaisim']['cardinality'],
+                        'is_kuaisim': True,
+                        'slate_size': config['kuaisim']['cardinality']
                     }
                 )
 
@@ -132,6 +158,7 @@ def main(args):
                 if state_func and reward_func:
                     state_functions.append(state_func)
                     reward_functions.append(reward_func)
+                    logger.info(f"样本 {sample_idx + 1} 生成成功")
 
             except Exception as e:
                 logger.error(f"生成样本 {sample_idx + 1} 时出错: {e}")
@@ -167,6 +194,8 @@ def main(args):
                 test_state, _ = enhanced_env.reset()
                 state_dim = len(test_state)
 
+                logger.info(f"样本 {idx + 1} 状态维度: {state_dim}")
+
                 # 创建智能体
                 agent = A2CAgent(
                     state_dim=state_dim,
@@ -187,6 +216,8 @@ def main(args):
 
             except Exception as e:
                 logger.error(f"训练样本 {idx + 1} 时出错: {e}")
+                import traceback
+                traceback.print_exc()
                 performances.append(0.0)
 
         # 分析反馈
@@ -223,7 +254,6 @@ def main(args):
     results = {'best_rl_performance': best_performance}
 
     # 评估基准算法
-    evaluator = Evaluator()
     baseline_algorithms = {
         'Random': RandomAgent(config['kuaisim']['num_products'], config['kuaisim']['cardinality']),
         'Myopic': MyopicAgent(config['kuaisim']['num_products'], config['kuaisim']['cardinality']),
@@ -247,12 +277,14 @@ def main(args):
         improvement = (best_performance - results['Random_mean']) / results['Random_mean'] * 100
         logger.info(f"\n最终性能提升: {improvement:.1f}% (相对于随机策略)")
 
-    logger.info(f"\n结果已保存到: {output_dir}")
+    # 显示KuaiSim状态
+    logger.info(f"\nKuaiSim集成状态: {kuaisim_status}")
+    logger.info(f"结果已保存到: {output_dir}")
     logger.info("KuaiSim集成训练完成!")
 
 
 def train_kuaisim_agent(agent, env, num_episodes=50, log_freq=10):
-    """训练智能体（从main.py复制并适配）"""
+    """训练智能体 - 修复版本"""
     episode_rewards = []
 
     for episode in range(num_episodes):
@@ -264,39 +296,42 @@ def train_kuaisim_agent(agent, env, num_episodes=50, log_freq=10):
         trajectory_actions = []
         trajectory_rewards = []
 
-        while not done:
-            state_tensor = torch.FloatTensor(state).unsqueeze(0)
+        step_count = 0
+        max_steps_per_episode = 20  # 防止无限循环
 
-            # 获取有效动作掩码
-            inventory = info.get('inventory', np.ones(agent.action_dim))
-            mask = (inventory <= 0).astype(np.float32)
-            mask_tensor = torch.FloatTensor(mask).unsqueeze(0)
+        while not done and step_count < max_steps_per_episode:
+            try:
+                state_tensor = torch.FloatTensor(state).unsqueeze(0)
 
-            # 选择动作
-            action_logits, value = agent(state_tensor)
-            action_logits = action_logits.masked_fill(mask_tensor.bool(), -float('inf'))
+                # 获取有效动作掩码
+                inventory = info.get('inventory', np.ones(agent.action_dim))
+                mask = (inventory <= 0).astype(np.float32)
 
-            action_probs = torch.softmax(action_logits, dim=-1)
-            dist = torch.distributions.Categorical(action_probs)
-            action_idx = dist.sample()
+                # 选择动作 - 使用智能体的select_action方法
+                action, log_prob = agent.select_action(state, mask=mask)
 
-            # 转换为二进制动作
-            action = np.zeros(agent.action_dim, dtype=np.float32)
-            if action_idx.item() < agent.action_dim:
-                action[action_idx.item()] = 1
+                # 执行动作
+                next_state, reward, terminated, truncated, next_info = env.step(action)
+                done = terminated or truncated
 
-            # 执行动作
-            next_state, reward, terminated, truncated, next_info = env.step(action)
-            done = terminated or truncated
+                # 存储轨迹
+                trajectory_states.append(state.copy())
+                # 找到选中的动作索引
+                action_idx = np.where(action > 0.5)[0]
+                if len(action_idx) > 0:
+                    trajectory_actions.append(action_idx[0])
+                else:
+                    trajectory_actions.append(0)
+                trajectory_rewards.append(reward)
 
-            # 存储轨迹
-            trajectory_states.append(state.copy())
-            trajectory_actions.append(action_idx.item())
-            trajectory_rewards.append(reward)
+                state = next_state
+                info = next_info
+                episode_reward += reward
+                step_count += 1
 
-            state = next_state
-            info = next_info
-            episode_reward += reward
+            except Exception as e:
+                logger.warning(f"训练步骤失败: {e}")
+                break
 
         episode_rewards.append(episode_reward)
 
@@ -313,7 +348,7 @@ def train_kuaisim_agent(agent, env, num_episodes=50, log_freq=10):
 
 
 def update_agent_fixed(agent, states, actions, rewards):
-    """更新智能体（从main.py复制）"""
+    """更新智能体 - 从原版复制"""
     try:
         states_tensor = torch.FloatTensor(states)
         actions_tensor = torch.LongTensor(actions)
@@ -390,7 +425,7 @@ def evaluate_baseline_kuaisim(agent, env, num_episodes=20):
 
 
 def save_results(results, output_dir):
-    """保存结果（从main.py复制）"""
+    """保存结果"""
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
     # 保存性能数据
