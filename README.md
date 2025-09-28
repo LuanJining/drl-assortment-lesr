@@ -50,7 +50,9 @@ DRL-Assortment-LESR 是一个端到端的强化学习系统，专门解决电商
 2. **创建虚拟环境**
    ```bash
    python -m venv .venv
-   source .venv/bin/activate  # Windows: .venv\Scripts\activate
+   source .venv/bin/activate
+   # Windows:
+   .venv\Scripts\activate
    ```
 
 3. **安装依赖**
@@ -358,9 +360,9 @@ flake8 .
 
 ## 📞 联系方式
 
-- 作者：[你的姓名]
-- 邮箱：your.email@example.com
-- 项目链接：[https://github.com/your-username/drl-assortment-lesr](https://github.com/your-username/drl-assortment-lesr)
+- 作者：栾吉宁
+- 邮箱：luanjining@163.com
+- 项目链接：[https://github.com/your-username/drl-assortment-lesr](https://github.com/LuanJining/drl-assortment-lesr)
 
 ## 🙏 致谢
 
