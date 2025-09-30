@@ -11,6 +11,136 @@ class IntrinsicRewardCalculator:
         self.reward_func = None
         self._error_printed = False
 
+    def _extract_function_only(self, code: str, function_name: str) -> str:
+        """提取函数定义，移除所有示例/测试代码"""
+        import re
+
+        try:
+            # 首先清理已弃用的类型
+            code = self._clean_code(code)
+
+            # 解析代码为AST
+            tree = ast.parse(code)
+
+            # 找到目标函数
+            target_function = None
+            for node in ast.walk(tree):
+                if isinstance(node, ast.FunctionDef) and node.name == function_name:
+                    target_function = node
+                    break
+
+            if target_function is None:
+                raise ValueError(f"未找到函数 {function_name}")
+
+            # 获取函数的源代码行范围
+            function_start = target_function.lineno - 1  # 转换为0索引
+            function_end = target_function.end_lineno if hasattr(target_function, 'end_lineno') else None
+
+            lines = code.split('\n')
+
+            # 提取函数定义部分
+            if function_end is not None:
+                function_lines = lines[function_start:function_end]
+            else:
+                # 如果没有end_lineno，手动查找函数结束位置
+                function_lines = []
+                in_function = False
+                indent_level = None
+
+                for i, line in enumerate(lines[function_start:], start=function_start):
+                    stripped = line.lstrip()
+
+                    # 函数定义开始
+                    if f'def {function_name}' in line:
+                        in_function = True
+                        indent_level = len(line) - len(stripped)
+                        function_lines.append(line)
+                        continue
+
+                    if not in_function:
+                        continue
+
+                    # 空行或注释，继续
+                    if not stripped or stripped.startswith('#'):
+                        function_lines.append(line)
+                        continue
+
+                    # 检查缩进级别
+                    current_indent = len(line) - len(stripped)
+
+                    # 如果缩进回到函数级别或更小，函数结束
+                    if current_indent <= indent_level:
+                        break
+
+                    function_lines.append(line)
+
+            # 重新组合代码
+            clean_code = '\n'.join(function_lines)
+
+            # 确保有numpy导入
+            if 'import numpy' not in clean_code:
+                clean_code = 'import numpy as np\n\n' + clean_code
+
+            return clean_code
+
+        except Exception as e:
+            print(f"AST提取函数失败: {e}")
+            # 降级方案：使用正则表达式
+            return self._extract_function_regex(code, function_name)
+
+    def _extract_function_regex(self, code: str, function_name: str) -> str:
+        """使用正则表达式提取函数（降级方案）"""
+        import re
+
+        # 清理代码
+        code = self._clean_code(code)
+
+        lines = code.split('\n')
+        function_lines = []
+        in_function = False
+        function_indent = None
+
+        for line in lines:
+            stripped = line.strip()
+
+            # 检测函数定义
+            if f'def {function_name}' in line and '(' in line and ':' in line:
+                in_function = True
+                function_indent = len(line) - len(line.lstrip())
+                function_lines.append(line)
+                continue
+
+            if not in_function:
+                # 保留导入语句
+                if stripped.startswith('import ') or stripped.startswith('from '):
+                    function_lines.insert(0, line)
+                continue
+
+            # 在函数内部
+            current_indent = len(line) - len(line.lstrip())
+
+            # 空行或注释
+            if not stripped or stripped.startswith('#'):
+                function_lines.append(line)
+                continue
+
+            # 如果缩进回到函数级别或更小，停止
+            if current_indent <= function_indent:
+                break
+
+            function_lines.append(line)
+
+        if not function_lines:
+            print(f"警告：无法提取函数 {function_name}，使用原始代码")
+            return code
+
+        clean_code = '\n'.join(function_lines)
+
+        if 'import numpy' not in clean_code:
+            clean_code = 'import numpy as np\n\n' + clean_code
+
+        return clean_code
+
     def _validate_code(self, code: str) -> bool:
         """验证代码的基本安全性和正确性"""
         try:
@@ -27,7 +157,7 @@ class IntrinsicRewardCalculator:
                     if len(node.args.args) != 5:
                         print(f"警告：intrinsic_reward 应该有5个参数，实际有 {len(node.args.args)} 个")
 
-                    # 🔧 修复：扩展允许的名称集合，包含Python内置函数和常用numpy函数
+                    # 扩展允许的名称集合，包含Python内置函数和常用numpy函数
                     defined_names = {
                         # 模块和参数
                         'np', 'numpy', 'state', 'action', 'next_state', 'sold_item', 'price',
@@ -50,8 +180,6 @@ class IntrinsicRewardCalculator:
                                 # 检查是否是在函数内定义的局部变量
                                 if not self._is_local_variable(subnode.id, node):
                                     print(f"警告：代码引用了未定义的变量: {subnode.id}")
-                                    # 🔧 修改：不再直接返回False，而是给出警告继续
-                                    # return False
 
             if not has_function:
                 print("错误：未找到 intrinsic_reward 函数")
@@ -80,29 +208,10 @@ class IntrinsicRewardCalculator:
 
     def load_function(self, function_code: str):
         """动态加载奖励函数"""
-        # 🔧 添加：清理生成的代码
-        function_code = self._clean_code(function_code)
+        # 🔧 新增：提取纯函数代码，移除所有示例代码
+        function_code = self._extract_function_only(function_code, 'intrinsic_reward')
 
-        # 确保代码包含 numpy 导入
-        if 'import numpy' not in function_code:
-            function_code = 'import numpy as np\n\n' + function_code
-
-        # 移除调试 print 语句
-        lines = function_code.split('\n')
-        filtered_lines = []
-        in_function = False
-        for line in lines:
-            if 'def intrinsic_reward' in line:
-                in_function = True
-            # 跳过函数内的 print 语句，但保留其他内容
-            if in_function and 'print(' in line and not line.strip().startswith('#'):
-                # 用注释替换print语句
-                filtered_lines.append('    # ' + line.strip() + '  # [print removed]')
-                continue
-            filtered_lines.append(line)
-        function_code = '\n'.join(filtered_lines)
-
-        # 验证代码（🔧 改为警告模式，不阻止加载）
+        # 验证代码（警告模式）
         self._validate_code(function_code)
 
         with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
@@ -140,7 +249,7 @@ class IntrinsicRewardCalculator:
                     pass
 
     def _clean_code(self, code: str) -> str:
-        """🔧 新增：清理生成的代码，修复常见问题"""
+        """清理生成的代码，修复常见问题"""
         import re
 
         # 使用正则表达式精确替换，避免重复替换

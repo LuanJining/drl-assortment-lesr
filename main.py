@@ -40,11 +40,6 @@ class EnhancedEnvironmentWrapper:
         self.previous_state = enhanced_obs.copy()
         return enhanced_obs, info
 
-    # ============================================
-    # main.py 修复补丁
-    # 在 EnhancedEnvironmentWrapper 类的 step 方法中添加
-    # ============================================
-
     def step(self, action):
         obs, reward, terminated, truncated, info = self.env.step(action)
 
@@ -67,7 +62,7 @@ class EnhancedEnvironmentWrapper:
                 price=reward
             )
 
-            # 🔧 新增第1处：裁剪内在奖励
+            # 🔧 裁剪内在奖励
             intrinsic = np.clip(intrinsic, -10.0, 10.0)
 
         except Exception as e:
@@ -79,12 +74,13 @@ class EnhancedEnvironmentWrapper:
         # 组合奖励
         total_reward = reward + intrinsic * 0.1
 
-        # 🔧 新增第2处：裁剪总奖励
+        # 🔧 裁剪总奖励
         total_reward = np.clip(total_reward, -100.0, 100.0)
 
         self.previous_state = enhanced_obs.copy()
 
         return enhanced_obs, total_reward, terminated, truncated, info
+
 
 def train_agent(agent, env, num_episodes=1000, log_freq=100):
     """训练智能体"""
@@ -234,59 +230,94 @@ def save_results(results, output_dir):
 
 
 def validate_generated_functions(state_func: str, reward_func: str) -> bool:
-    """🔧 修复：灵活检查变量名"""
+    """验证生成的函数质量"""
     issues = []
+    warnings = []
 
-    # 检查状态函数
+    # === 检查状态函数 ===
     if 'def enhance_state' not in state_func:
         issues.append("状态函数缺少函数定义")
 
     if 'return' not in state_func:
         issues.append("状态函数没有return语句")
 
-    # 🔧 修复：检查任何变量的 append/extend，不只是 'features'
-    has_list_ops = (
-            '.append(' in state_func or
-            '.extend(' in state_func or
-            'features' in state_func or
-            'base_state' in state_func or
-            'state_list' in state_func
-    )
+    # 检查是否有示例代码
+    state_lines = state_func.split('\n')
+    after_function = False
+    function_indent = None
 
-    if not has_list_ops:
-        issues.append("状态函数可能没有构建特征列表")
+    for line in state_lines:
+        if 'def enhance_state' in line:
+            after_function = True
+            function_indent = len(line) - len(line.lstrip())
+            continue
 
-    # 检查奖励函数
+        if after_function:
+            stripped = line.strip()
+            if not stripped or stripped.startswith('#'):
+                continue
+
+            # 检查缩进
+            current_indent = len(line) - len(line.lstrip())
+
+            # 如果回到函数级别或更外层，且不是空行/注释
+            if current_indent <= function_indent and stripped:
+                if not stripped.startswith('def ') and not stripped.startswith('class '):
+                    issues.append(f"状态函数后有模块级代码: {stripped[:50]}")
+                    break
+
+    # 检查特征数量（粗略估计）
+    feature_count = state_func.count('features.append') + state_func.count('features.extend')
+    if feature_count < 3:
+        warnings.append("状态函数可能生成特征过少")
+
+    # === 检查奖励函数 ===
     if 'def intrinsic_reward' not in reward_func:
         issues.append("奖励函数缺少函数定义")
 
     if 'return' not in reward_func:
         issues.append("奖励函数没有return语句")
 
-    # 检查明显的除零风险
-    if '/ 0' in state_func or '/(0)' in state_func:
-        issues.append("状态函数有明显的除零风险")
+    # 检查是否有示例代码
+    reward_lines = reward_func.split('\n')
+    after_function = False
+    function_indent = None
 
-    if '/ 0' in reward_func or '/(0)' in reward_func:
-        issues.append("奖励函数有明显的除零风险")
+    for line in reward_lines:
+        if 'def intrinsic_reward' in line:
+            after_function = True
+            function_indent = len(line) - len(line.lstrip())
+            continue
 
+        if after_function:
+            stripped = line.strip()
+            if not stripped or stripped.startswith('#'):
+                continue
+
+            current_indent = len(line) - len(line.lstrip())
+
+            if current_indent <= function_indent and stripped:
+                if not stripped.startswith('def ') and not stripped.startswith('class '):
+                    issues.append(f"奖励函数后有模块级代码: {stripped[:50]}")
+                    break
+
+    # 检查常见错误
+    if 'sold_item * price' in reward_func:
+        warnings.append("奖励函数可能错误使用 sold_item（它是索引不是数量）")
+
+    if 'enhance_state' in reward_func:
+        issues.append("奖励函数不应引用 enhance_state")
+
+    # 输出结果
     if issues:
-        logger.warning(f"生成的函数存在严重问题: {', '.join(issues)}")
+        logger.error(f"生成的函数有严重问题: {'; '.join(issues)}")
         return False
 
-    # 只是警告，不阻止
-    warnings = []
-
-    if 'np.clip' not in reward_func and 'clip' not in reward_func:
-        warnings.append("奖励函数建议添加裁剪（但不强制）")
-
-    if '+ 1e-8' not in state_func and '+ 1e-10' not in state_func:
-        warnings.append("状态函数建议添加除零保护（但不强制）")
-
     if warnings:
-        logger.info(f"函数质量提醒: {', '.join(warnings)}")
+        logger.warning(f"生成的函数有潜在问题: {'; '.join(warnings)}")
 
-    return True  # ✅ 通过验证
+    return True
+
 
 def main(args):
     with open(args.config, 'r') as f:
@@ -347,15 +378,41 @@ def main(args):
                     performance_feedback=feedback_analyzer.get_serializable_feedback()
                 )
 
-                # 🔧 新增：验证函数质量
-                # 直接改为：
-                if state_func and reward_func:
-                    # 🔧 生成的函数质量很好，直接使用
-                    state_functions.append(state_func)
-                    reward_functions.append(reward_func)
+                # 🔧 新增：立即验证
+                if not validate_generated_functions(state_func, reward_func):
+                    logger.warning(f"样本 {sample_idx + 1} 验证失败，跳过")
+                    continue
+
+                # 🔧 新增：尝试预加载测试
+                test_state_enhancer = StateEnhancer()
+                test_reward_calc = IntrinsicRewardCalculator()
+
+                if not test_state_enhancer.load_function(state_func):
+                    logger.warning(f"样本 {sample_idx + 1} 状态函数加载失败")
+                    continue
+
+                if not test_reward_calc.load_function(reward_func):
+                    logger.warning(f"样本 {sample_idx + 1} 奖励函数加载失败")
+                    continue
+
+                # 验证通过，添加到列表
+                state_functions.append(state_func)
+                reward_functions.append(reward_func)
+
+                # 🔧 新增：保存生成的函数（用于调试）
+                if config.get('debug', {}).get('save_generated_functions', True):
+                    debug_dir = output_dir / "generated_functions" / f"iter_{iteration + 1}"
+                    debug_dir.mkdir(parents=True, exist_ok=True)
+
+                    with open(debug_dir / f"sample_{sample_idx + 1}_state.py", 'w') as f:
+                        f.write(state_func)
+                    with open(debug_dir / f"sample_{sample_idx + 1}_reward.py", 'w') as f:
+                        f.write(reward_func)
 
             except Exception as e:
                 logger.error(f"生成样本 {sample_idx + 1} 时出错: {e}")
+                import traceback
+                traceback.print_exc()
 
         if not state_functions:
             logger.warning("使用默认状态增强函数")
@@ -385,7 +442,7 @@ def main(args):
 
                 logger.info(f"状态维度: {state_dim}")
 
-                # 🔧 新增：检查状态维度
+                # 🔧 检查状态维度
                 if state_dim < 10:
                     logger.warning(f"状态维度太小({state_dim})，可能影响性能")
 
@@ -403,10 +460,10 @@ def main(args):
                     log_freq=50
                 )
 
-                # 🔧 新增：检测异常性能
+                # 🔧 检测异常性能
                 if performance > 10000:
                     logger.warning(f"样本 {idx + 1} 性能异常高({performance:.2f})，可能奖励爆炸")
-                    performance = 0.0  # 标记为失败
+                    performance = 0.0
 
                 performances.append(performance)
                 logger.info(f"样本 {idx + 1} 性能: {performance:.2f}")

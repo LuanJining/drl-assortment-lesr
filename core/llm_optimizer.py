@@ -9,7 +9,6 @@ from typing import Dict, List, Tuple, Optional
 # 尝试导入OpenAI，如果失败则使用requests作为备选
 try:
     from openai import OpenAI
-
     OPENAI_AVAILABLE = True
 except ImportError:
     OPENAI_AVAILABLE = False
@@ -193,7 +192,7 @@ class LLMOptimizer:
             raise Exception("没有可用的API连接方式")
 
     def _clean_generated_code(self, code: str) -> str:
-        """🔧 新增：清理生成的代码，修复常见问题"""
+        """清理生成的代码，修复常见问题"""
         if not code:
             return code
 
@@ -233,7 +232,7 @@ class LLMOptimizer:
             code = self._extract_code(content)
 
             if code:
-                # 🔧 添加代码清理步骤
+                # 添加代码清理步骤
                 code = self._clean_generated_code(code)
                 self.logger.info("成功生成状态表示函数")
                 return code
@@ -263,7 +262,7 @@ class LLMOptimizer:
             code = self._extract_code(content)
 
             if code:
-                # 🔧 添加代码清理步骤
+                # 添加代码清理步骤
                 code = self._clean_generated_code(code)
                 self.logger.info("成功生成内在奖励函数")
                 return code
@@ -290,16 +289,74 @@ class LLMOptimizer:
         matches = re.findall(code_pattern, response_text, re.DOTALL)
 
         if matches:
-            return matches[0].strip()
+            code = matches[0].strip()
+        else:
+            # 尝试提取函数定义
+            func_pattern = r'(def\s+\w+\s*\([^)]*\):.*?)(?=\n\n|\n(?:def|class|import|#)|$)'
+            func_matches = re.findall(func_pattern, response_text, re.DOTALL)
 
-        # 如果没有找到标记的代码块，尝试提取函数定义
-        func_pattern = r'(def\s+\w+\s*\([^)]*\):.*?)(?=\n\n|\n(?:def|class|import|#)|$)'
-        func_matches = re.findall(func_pattern, response_text, re.DOTALL)
+            if func_matches:
+                code = '\n\n'.join(func_matches).strip()
+            else:
+                code = response_text.strip()
 
-        if func_matches:
-            return '\n\n'.join(func_matches).strip()
+        # 🔧 新增：移除函数定义后的所有模块级代码
+        code = self._remove_module_level_code(code)
 
-        return response_text.strip()
+        return code
+
+    def _remove_module_level_code(self, code: str) -> str:
+        """移除函数定义后的模块级代码"""
+        lines = code.split('\n')
+        clean_lines = []
+        in_function = False
+        function_indent = None
+
+        for line in lines:
+            stripped = line.strip()
+
+            # 保留导入语句
+            if stripped.startswith('import ') or stripped.startswith('from '):
+                clean_lines.append(line)
+                continue
+
+            # 检测函数定义开始
+            if 'def ' in stripped and '(' in stripped and ':' in stripped:
+                in_function = True
+                function_indent = len(line) - len(line.lstrip())
+                clean_lines.append(line)
+                continue
+
+            # 如果还没进入函数，保留（可能是注释等）
+            if not in_function:
+                if not stripped or stripped.startswith('#'):
+                    clean_lines.append(line)
+                continue
+
+            # 在函数内部
+            if in_function:
+                current_indent = len(line) - len(line.lstrip())
+
+                # 空行或注释
+                if not stripped or stripped.startswith('#'):
+                    clean_lines.append(line)
+                    continue
+
+                # 如果缩进回到函数级别或更小，停止
+                if current_indent <= function_indent:
+                    # 除非是另一个函数定义
+                    if 'def ' in stripped:
+                        in_function = True
+                        function_indent = current_indent
+                        clean_lines.append(line)
+                    else:
+                        # 模块级代码，停止收集
+                        break
+                else:
+                    # 函数内部代码
+                    clean_lines.append(line)
+
+        return '\n'.join(clean_lines)
 
     def _get_default_state_function(self) -> str:
         """获取默认状态增强函数"""
@@ -407,14 +464,15 @@ def intrinsic_reward(state, action, next_state, sold_item, price):
 ⚠️ 重要约束：
 - 函数名必须是 enhance_state
 - 输入参数: inventory, customer_type, prices, time_remaining, initial_inventory
-- 返回 numpy.ndarray
+- 返回 numpy.ndarray，必须包含至少15个特征
 - 不要使用 np.float，使用 float 或 np.float64
 - 不要使用 np.int，使用 int 或 np.int64
 - 可以使用 Python 内置函数：sum(), max(), min(), abs(), len(), float(), int() 等
 - 处理边界情况，避免除零错误
 - 确保所有特征都是有意义的数值
+- ❌ **绝对不要在函数后添加示例代码、测试代码或任何模块级代码！**
 
-请生成一个创新的状态增强函数。
+请生成一个创新的状态增强函数。记住：只返回函数定义，不要添加任何示例代码！
 """
         return prompt
 
@@ -441,14 +499,18 @@ def intrinsic_reward(state, action, next_state, sold_item, price):
 - 函数名必须是 intrinsic_reward
 - 输入参数: state, action, next_state, sold_item, price
 - 返回 float 数值（标量）
+- sold_item 是产品索引（0-9），不是销售数量！
+- 如果 sold_item >= 0，表示售出了该索引的产品，奖励应该是 price（不是 sold_item * price）
 - 不要使用 np.float，使用 float 或 np.float64
 - 不要使用 np.int，使用 int 或 np.int64
 - 可以使用 Python 内置函数：sum(), max(), min(), abs(), len(), float(), int() 等
 - 可以使用 numpy 函数：np.sum(), np.mean(), np.std(), np.sqrt() 等
 - 数值稳定，避免异常情况
 - 提供有意义的学习信号
+- 使用 np.clip 限制奖励在 -10 到 10 之间
+- ❌ **绝对不要在函数后添加示例代码、测试代码或任何模块级代码！**
 
-请生成一个平衡且有效的内在奖励函数。
+请生成一个平衡且有效的内在奖励函数。记住：只返回函数定义，不要添加任何示例代码！
 """
         return prompt
 
