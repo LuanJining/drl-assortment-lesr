@@ -13,22 +13,38 @@ prompts:
       - 客户类型: {num_customer_types}
       - 展示限制: {cardinality}
       
-      要求:
+      ⚠️ 关键要求（必须遵守）:
       1. **必须在代码开头包含: import numpy as np**
-      2. 函数名必须是 enhance_state
-      3. 输入参数: inventory, customer_type, prices, time_remaining, initial_inventory
-      4. 返回 numpy.ndarray (必须使用 np.array() 包装)
-      5. 添加有意义的特征
-      6. **不要使用print语句进行调试**
-      7. **只使用函数参数中的变量，不要引用未定义的变量**
+      2. **函数名必须是 enhance_state**
+      3. **输入参数必须是: inventory, customer_type, prices, time_remaining, initial_inventory**
+      4. **返回类型必须是 numpy.ndarray (使用 np.array() 包装)**
+      5. **不要使用已弃用的类型:**
+         - ❌ 错误: np.float, np.int, np.bool
+         - ✅ 正确: float, int, bool 或 np.float64, np.int64, np.bool_
+      6. **可以使用的函数:**
+         - Python内置: sum(), max(), min(), abs(), len(), float(), int(), round()
+         - NumPy函数: np.sum(), np.mean(), np.std(), np.sqrt(), np.clip()
+      7. **不要使用print()进行调试**
+      8. **只使用函数参数中的变量，不要引用外部变量**
+      9. **确保所有数组操作的形状一致**
       
-      示例特征:
-      - 库存压力指标
-      - 库存不平衡度
-      - 时间衰减因子
-      - 价格敏感度
+      ⚠️ 特征数量要求:
+      - 必须返回至少15个特征值
+      - 基础特征（必须包含）：
+        * 10个产品的相对库存（inventory / initial_inventory）
+        * 4个客户类型的one-hot编码
+        * 1个归一化的时间特征
+      - 增强特征（推荐包含）：
+        * 库存压力指标
+        * 库存不平衡度（标准差）
+        * 低库存产品比例
+        * 价格加权库存
       
-      代码格式示例:
+      ⚠️ 除零保护（必须）:
+      - 所有除法运算必须添加 1e-8 防止除零
+      - 示例：inventory / (initial_inventory + 1e-8)
+      
+      代码格式示例（必须遵循）:
       ```python
       import numpy as np
       
@@ -38,16 +54,52 @@ prompts:
           # 确保输入是numpy数组
           inventory = np.array(inventory, dtype=np.float32)
           initial_inventory = np.array(initial_inventory, dtype=np.float32)
+          prices = np.array(prices, dtype=np.float32) if prices is not None else np.ones(len(inventory), dtype=np.float32)
           
-          # 基础特征
+          # === 基础特征（必须包含） ===
+          
+          # 1. 相对库存（10个特征）- 注意除零保护
           relative_inventory = inventory / (initial_inventory + 1e-8)
           features.extend(relative_inventory.tolist())
           
-          # 你的增强特征
-          # ...
+          # 2. 客户类型one-hot编码（4个特征）
+          customer_encoding = np.zeros(4, dtype=np.float32)
+          if 0 <= customer_type < 4:
+              customer_encoding[int(customer_type)] = 1.0
+          features.extend(customer_encoding.tolist())
           
+          # 3. 时间特征（1个特征）- 归一化
+          features.append(float(time_remaining) / 100.0)
+          
+          # === 增强特征（推荐包含） ===
+          
+          # 4. 库存压力 - 注意除零保护
+          inventory_sum = float(np.sum(inventory))
+          initial_sum = float(np.sum(initial_inventory))
+          pressure = 1.0 - (inventory_sum / (initial_sum + 1e-8))
+          features.append(pressure)
+          
+          # 5. 库存不平衡度
+          imbalance = float(np.std(relative_inventory))
+          features.append(imbalance)
+          
+          # 6. 低库存产品比例
+          low_stock_ratio = float(np.mean(relative_inventory < 0.3))
+          features.append(low_stock_ratio)
+          
+          # 7. 价格加权库存 - 注意除零保护
+          if len(prices) == len(inventory):
+              weighted_inv = float(np.sum(prices * inventory)) / (float(np.sum(prices * initial_inventory)) + 1e-8)
+          else:
+              weighted_inv = 0.5
+          features.append(weighted_inv)
+          
+          # 最终应该有至少17个特征
+          # 返回numpy数组
           return np.array(features, dtype=np.float32)
       ```
+      
+      请生成一个创新且稳健的状态增强函数。
 
   reward_generation:
     system: |
@@ -61,56 +113,90 @@ prompts:
       性能反馈:
       {performance_feedback}
       
-      要求:
+      ⚠️ 关键要求（必须遵守）:
       1. **必须在代码开头包含: import numpy as np**
-      2. 函数名必须是 intrinsic_reward
-      3. 输入参数: state, action, next_state, sold_item, price
+      2. **函数名必须是 intrinsic_reward**
+      3. **输入参数必须是: state, action, next_state, sold_item, price**
          - state: numpy数组，增强后的状态向量
          - action: 整数，选择的动作索引
          - next_state: numpy数组，下一个状态向量
          - sold_item: 整数，售出的产品ID（-1表示未售出）
          - price: 浮点数，产品价格（或销售收益）
-      4. 返回 float 数值（标量）
-      5. 考虑多个目标的平衡
-      6. 避免稀疏奖励问题
-      7. 鼓励探索
-      8. **不要使用print语句进行调试**
-      9. **只使用函数参数，不要引用函数外的变量**
-      10. **所有变量必须在函数内定义**
+      4. **返回类型必须是 float（标量，不是数组）**
+      5. **不要使用已弃用的类型:**
+         - ❌ 错误: np.float, np.int, np.bool
+         - ✅ 正确: float, int, bool 或 np.float64, np.int64, np.bool_
+      6. **可以使用的函数:**
+         - Python内置: sum(), max(), min(), abs(), len(), float(), int(), round()
+         - NumPy函数: np.sum(), np.mean(), np.std(), np.sqrt(), np.clip()
+      7. **不要使用print()进行调试**
+      8. **只使用函数参数，不要引用函数外的变量**
+      9. **所有变量必须在函数内定义**
+      10. **奖励值应该在合理范围内（建议 -10 到 10）**
       
-      代码格式示例:
+      设计原则:
+      - 考虑多个目标的平衡（销售、库存、满意度）
+      - 避免稀疏奖励问题
+      - 鼓励探索但不过度
+      - 提供密集且有意义的学习信号
+      - 数值稳定，避免极端值
+      - **关键：奖励必须在 -10 到 +10 范围内**
+      - **使用 np.clip(reward, -10.0, 10.0) 限制最终奖励**
+      
+      代码格式示例（必须遵循）:
       ```python
       import numpy as np
       
       def intrinsic_reward(state, action, next_state, sold_item, price):
           reward = 0.0
           
-          # 确保输入类型正确
-          state = np.array(state, dtype=np.float32)
-          next_state = np.array(next_state, dtype=np.float32)
+          try:
+              # 确保输入类型正确
+              state = np.array(state, dtype=np.float32)
+              next_state = np.array(next_state, dtype=np.float32)
+              
+              # 奖励组件1：销售奖励（权重应该较小，比如0.1）
+              if sold_item >= 0 and price > 0:
+                  sale_reward = float(price) * 0.1
+                  reward += sale_reward
+              
+              # 奖励组件2：库存平衡奖励（惩罚不平衡）
+              if len(state) > 10:
+                  inventory_features = state[:10]
+                  inventory_std = float(np.std(inventory_features))
+                  balance_penalty = -inventory_std * 0.5  # 系数要小
+                  reward += balance_penalty
+              
+              # 奖励组件3：时间压力奖励
+              if len(state) > 14:
+                  time_remaining = float(state[14])
+                  urgency_bonus = (1.0 - time_remaining) * 0.1  # 系数要小
+                  reward += urgency_bonus
+              
+              # 奖励组件4：避免缺货（检查next_state）
+              if len(next_state) > 10:
+                  next_inventory = next_state[:10]
+                  stockout_count = float(np.sum(next_inventory == 0))
+                  stockout_penalty = -stockout_count * 0.2
+                  reward += stockout_penalty
+              
+              # ⚠️ 关键：必须裁剪奖励到合理范围
+              reward = float(np.clip(reward, -10.0, 10.0))
+              
+          except Exception as e:
+              # 如果计算失败，返回小的正奖励
+              reward = 0.01
           
-          # 销售奖励
-          if sold_item >= 0:
-              reward += price * 0.1
-          
-          # 库存平衡奖励（使用state中的特征）
-          if len(state) > 10:
-              inventory_features = state[:10]
-              inventory_std = float(np.std(inventory_features))
-              reward -= inventory_std * 0.05
-          
-          # 时间压力奖励
-          if len(state) > 14:
-              time_remaining = float(state[14])
-              reward += (1.0 - time_remaining) * 0.02
-          
+          # 必须返回Python标量float
           return float(reward)
       ```
       
+      请生成一个平衡、稳健且有效的内在奖励函数。
+
   analysis:
     system: |
       分析强化学习训练结果，提供改进建议。
-    
+
     user_template: |
       训练结果:
       {results}
@@ -120,3 +206,5 @@ prompts:
       2. 性能瓶颈在哪里？
       3. 如何改进状态表示？
       4. 如何优化奖励函数？
+      5. 是否存在过拟合或欠拟合？
+      6. 建议的超参数调整？

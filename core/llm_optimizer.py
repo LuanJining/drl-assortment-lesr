@@ -192,6 +192,30 @@ class LLMOptimizer:
         else:
             raise Exception("没有可用的API连接方式")
 
+    def _clean_generated_code(self, code: str) -> str:
+        """🔧 新增：清理生成的代码，修复常见问题"""
+        if not code:
+            return code
+
+        import re
+
+        # 使用正则表达式精确替换，避免重复替换
+        # 只替换 np.float 但不替换 np.float32/np.float64 等
+        code = re.sub(r'\bnp\.float\b(?!32|64|16)', 'np.float64', code)
+        code = re.sub(r'\bnp\.int\b(?!8|16|32|64)', 'np.int64', code)
+        code = re.sub(r'\bnp\.bool\b(?!_)', 'np.bool_', code)
+
+        # 同样处理 numpy.xxx 格式
+        code = re.sub(r'\bnumpy\.float\b(?!32|64|16)', 'numpy.float64', code)
+        code = re.sub(r'\bnumpy\.int\b(?!8|16|32|64)', 'numpy.int64', code)
+        code = re.sub(r'\bnumpy\.bool\b(?!_)', 'numpy.bool_', code)
+
+        # 确保有numpy导入
+        if 'import numpy' not in code and 'import np' not in code:
+            code = 'import numpy as np\n\n' + code
+
+        return code
+
     def generate_state_representation(self,
                                       task_description: str,
                                       state_info: Dict) -> str:
@@ -209,6 +233,8 @@ class LLMOptimizer:
             code = self._extract_code(content)
 
             if code:
+                # 🔧 添加代码清理步骤
+                code = self._clean_generated_code(code)
                 self.logger.info("成功生成状态表示函数")
                 return code
             else:
@@ -237,6 +263,8 @@ class LLMOptimizer:
             code = self._extract_code(content)
 
             if code:
+                # 🔧 添加代码清理步骤
+                code = self._clean_generated_code(code)
                 self.logger.info("成功生成内在奖励函数")
                 return code
             else:
@@ -376,10 +404,13 @@ def intrinsic_reward(state, action, next_state, sold_item, price):
 3. 计算预期的未来价值
 4. 评估库存分布的均衡性
 
-要求：
+⚠️ 重要约束：
 - 函数名必须是 enhance_state
 - 输入参数: inventory, customer_type, prices, time_remaining, initial_inventory
 - 返回 numpy.ndarray
+- 不要使用 np.float，使用 float 或 np.float64
+- 不要使用 np.int，使用 int 或 np.int64
+- 可以使用 Python 内置函数：sum(), max(), min(), abs(), len(), float(), int() 等
 - 处理边界情况，避免除零错误
 - 确保所有特征都是有意义的数值
 
@@ -406,10 +437,14 @@ def intrinsic_reward(state, action, next_state, sold_item, price):
 4. 考虑时间压力因素
 5. 提供稳定的学习信号
 
-要求：
+⚠️ 重要约束：
 - 函数名必须是 intrinsic_reward
 - 输入参数: state, action, next_state, sold_item, price
-- 返回 float 数值
+- 返回 float 数值（标量）
+- 不要使用 np.float，使用 float 或 np.float64
+- 不要使用 np.int，使用 int 或 np.int64
+- 可以使用 Python 内置函数：sum(), max(), min(), abs(), len(), float(), int() 等
+- 可以使用 numpy 函数：np.sum(), np.mean(), np.std(), np.sqrt() 等
 - 数值稳定，避免异常情况
 - 提供有意义的学习信号
 

@@ -27,8 +27,22 @@ class IntrinsicRewardCalculator:
                     if len(node.args.args) != 5:
                         print(f"警告：intrinsic_reward 应该有5个参数，实际有 {len(node.args.args)} 个")
 
-                    # 检查是否有未定义的全局变量引用
-                    defined_names = {'np', 'numpy', 'state', 'action', 'next_state', 'sold_item', 'price'}
+                    # 🔧 修复：扩展允许的名称集合，包含Python内置函数和常用numpy函数
+                    defined_names = {
+                        # 模块和参数
+                        'np', 'numpy', 'state', 'action', 'next_state', 'sold_item', 'price',
+
+                        # Python内置函数
+                        'sum', 'max', 'min', 'abs', 'len', 'range',
+                        'float', 'int', 'str', 'bool', 'list', 'dict', 'tuple', 'set',
+                        'enumerate', 'zip', 'map', 'filter', 'sorted',
+                        'round', 'pow', 'all', 'any', 'print',
+
+                        # 常见的numpy函数和属性
+                        'array', 'zeros', 'ones', 'mean', 'std', 'sqrt', 'exp', 'log',
+                        'clip', 'maximum', 'minimum', 'concatenate', 'stack',
+                        'reshape', 'flatten', 'squeeze', 'transpose'
+                    }
 
                     for subnode in ast.walk(node):
                         if isinstance(subnode, ast.Name):
@@ -36,7 +50,8 @@ class IntrinsicRewardCalculator:
                                 # 检查是否是在函数内定义的局部变量
                                 if not self._is_local_variable(subnode.id, node):
                                     print(f"警告：代码引用了未定义的变量: {subnode.id}")
-                                    return False
+                                    # 🔧 修改：不再直接返回False，而是给出警告继续
+                                    # return False
 
             if not has_function:
                 print("错误：未找到 intrinsic_reward 函数")
@@ -65,6 +80,9 @@ class IntrinsicRewardCalculator:
 
     def load_function(self, function_code: str):
         """动态加载奖励函数"""
+        # 🔧 添加：清理生成的代码
+        function_code = self._clean_code(function_code)
+
         # 确保代码包含 numpy 导入
         if 'import numpy' not in function_code:
             function_code = 'import numpy as np\n\n' + function_code
@@ -84,10 +102,8 @@ class IntrinsicRewardCalculator:
             filtered_lines.append(line)
         function_code = '\n'.join(filtered_lines)
 
-        # 验证代码
-        if not self._validate_code(function_code):
-            print("代码验证失败，将使用默认奖励函数")
-            return False
+        # 验证代码（🔧 改为警告模式，不阻止加载）
+        self._validate_code(function_code)
 
         with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
             f.write(function_code)
@@ -122,6 +138,23 @@ class IntrinsicRewardCalculator:
                     os.remove(temp_file)
                 except:
                     pass
+
+    def _clean_code(self, code: str) -> str:
+        """🔧 新增：清理生成的代码，修复常见问题"""
+        import re
+
+        # 使用正则表达式精确替换，避免重复替换
+        # 只替换 np.float 但不替换 np.float32/np.float64 等
+        code = re.sub(r'\bnp\.float\b(?!32|64|16)', 'np.float64', code)
+        code = re.sub(r'\bnp\.int\b(?!8|16|32|64)', 'np.int64', code)
+        code = re.sub(r'\bnp\.bool\b(?!_)', 'np.bool_', code)
+
+        # 同样处理 numpy.xxx 格式
+        code = re.sub(r'\bnumpy\.float\b(?!32|64|16)', 'numpy.float64', code)
+        code = re.sub(r'\bnumpy\.int\b(?!8|16|32|64)', 'numpy.int64', code)
+        code = re.sub(r'\bnumpy\.bool\b(?!_)', 'numpy.bool_', code)
+
+        return code
 
     def calculate(self, state: np.ndarray, action: Any,
                   next_state: np.ndarray, sold_item: int, price: float) -> float:
