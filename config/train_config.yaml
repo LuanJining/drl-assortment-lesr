@@ -4,8 +4,8 @@ llm:
   temperature: 0.7
   samples_per_iteration: 3  # 减少采样数量以节省费用和时间
   max_iterations: 3
-  api_key: "sk-eM1CKOeVcmjqjIA7jZiRyMDXq1PwQo5i9Vi08njyxEicKcPt"
-  base_url: "https://api.chatanywhere.tech/v1"  # 确保正确的base_url
+  api_key: ""
+  base_url: ""  # 确保正确的base_url
 
   # 新增配置项
   max_retries: 3
