@@ -32,10 +32,12 @@ class EnhancedEnvironmentWrapper:
         self.env = base_env
         self.state_enhancer = state_enhancer
         self.reward_calculator = reward_calculator
+        self.previous_state = None  # 存储前一个状态
 
     def reset(self, seed=None):
         obs, info = self.env.reset(seed)
         enhanced_obs = self.state_enhancer.enhance(info)
+        self.previous_state = enhanced_obs.copy()  # 记录初始状态
         return enhanced_obs, info
 
     def step(self, action):
@@ -44,21 +46,37 @@ class EnhancedEnvironmentWrapper:
         # 增强状态
         enhanced_obs = self.state_enhancer.enhance(info)
 
-        # 计算内在奖励
-        intrinsic = self.reward_calculator.calculate(
-            enhanced_obs,
-            action,
-            enhanced_obs,  # 这里简化了，实际应该是前一个状态
-            info.get('sold_item', -1),
-            reward
-        )
+        # 计算内在奖励 - 修复参数传递
+        try:
+            # 将二进制动作向量转换为动作索引（如果需要）
+            if isinstance(action, np.ndarray) and len(action) > 1:
+                # 如果是多个产品的二进制向量，取第一个选中的产品索引
+                selected_products = np.where(action > 0)[0]
+                action_idx = selected_products[0] if len(selected_products) > 0 else -1
+            else:
+                action_idx = action
+
+            intrinsic = self.reward_calculator.calculate(
+                state=self.previous_state if self.previous_state is not None else enhanced_obs,
+                action=action_idx,  # 传递动作索引而不是完整向量
+                next_state=enhanced_obs,
+                sold_item=info.get('sold_item', -1),
+                price=reward  # 外在奖励就是销售价格
+            )
+        except Exception as e:
+            # 如果计算失败，内在奖励设为0
+            intrinsic = 0.0
+            if not hasattr(self, '_intrinsic_error_logged'):
+                print(f"内在奖励计算出错: {e}")
+                self._intrinsic_error_logged = True
 
         # 组合奖励
         total_reward = reward + intrinsic * 0.1  # 权重可调
 
+        # 更新前一个状态
+        self.previous_state = enhanced_obs.copy()
+
         return enhanced_obs, total_reward, terminated, truncated, info
-
-
 def train_agent(agent, env, num_episodes=1000, log_freq=100):
     """训练智能体 - 修复梯度问题"""
     episode_rewards = []
@@ -296,7 +314,7 @@ def main(args):
                 # 生成奖励函数
                 reward_func = llm_optimizer.generate_intrinsic_reward(
                     state_representation=state_func,
-                    performance_feedback=None if iteration == 0 else feedback_analyzer.performance_history[-1]
+                    performance_feedback=feedback_analyzer.get_serializable_feedback()
                 )
 
                 if state_func and reward_func:

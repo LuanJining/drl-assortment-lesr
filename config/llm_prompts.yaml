@@ -14,22 +14,46 @@ prompts:
       - 展示限制: {cardinality}
       
       要求:
-      1. 函数名必须是 enhance_state
-      2. 输入参数: inventory, customer_type, prices, time_remaining, initial_inventory
-      3. 返回 numpy.ndarray
-      4. 添加有意义的特征
+      1. **必须在代码开头包含: import numpy as np**
+      2. 函数名必须是 enhance_state
+      3. 输入参数: inventory, customer_type, prices, time_remaining, initial_inventory
+      4. 返回 numpy.ndarray (必须使用 np.array() 包装)
+      5. 添加有意义的特征
+      6. **不要使用print语句进行调试**
+      7. **只使用函数参数中的变量，不要引用未定义的变量**
       
       示例特征:
       - 库存压力指标
       - 库存不平衡度
       - 时间衰减因子
       - 价格敏感度
-  
+      
+      代码格式示例:
+      ```python
+      import numpy as np
+      
+      def enhance_state(inventory, customer_type, prices, time_remaining, initial_inventory):
+          features = []
+          
+          # 确保输入是numpy数组
+          inventory = np.array(inventory, dtype=np.float32)
+          initial_inventory = np.array(initial_inventory, dtype=np.float32)
+          
+          # 基础特征
+          relative_inventory = inventory / (initial_inventory + 1e-8)
+          features.extend(relative_inventory.tolist())
+          
+          # 你的增强特征
+          # ...
+          
+          return np.array(features, dtype=np.float32)
+      ```
+
   reward_generation:
     system: |
       你是一个强化学习专家，擅长设计奖励函数。
       基于给定的状态表示，设计合适的内在奖励函数。
-    
+
     user_template: |
       状态表示函数:
       {state_function}
@@ -38,10 +62,50 @@ prompts:
       {performance_feedback}
       
       要求:
-      1. 函数名必须是 intrinsic_reward
-      2. 考虑多个目标的平衡
-      3. 避免稀疏奖励问题
-      4. 鼓励探索
+      1. **必须在代码开头包含: import numpy as np**
+      2. 函数名必须是 intrinsic_reward
+      3. 输入参数: state, action, next_state, sold_item, price
+         - state: numpy数组，增强后的状态向量
+         - action: 整数，选择的动作索引
+         - next_state: numpy数组，下一个状态向量
+         - sold_item: 整数，售出的产品ID（-1表示未售出）
+         - price: 浮点数，产品价格（或销售收益）
+      4. 返回 float 数值（标量）
+      5. 考虑多个目标的平衡
+      6. 避免稀疏奖励问题
+      7. 鼓励探索
+      8. **不要使用print语句进行调试**
+      9. **只使用函数参数，不要引用函数外的变量**
+      10. **所有变量必须在函数内定义**
+      
+      代码格式示例:
+      ```python
+      import numpy as np
+      
+      def intrinsic_reward(state, action, next_state, sold_item, price):
+          reward = 0.0
+          
+          # 确保输入类型正确
+          state = np.array(state, dtype=np.float32)
+          next_state = np.array(next_state, dtype=np.float32)
+          
+          # 销售奖励
+          if sold_item >= 0:
+              reward += price * 0.1
+          
+          # 库存平衡奖励（使用state中的特征）
+          if len(state) > 10:
+              inventory_features = state[:10]
+              inventory_std = float(np.std(inventory_features))
+              reward -= inventory_std * 0.05
+          
+          # 时间压力奖励
+          if len(state) > 14:
+              time_remaining = float(state[14])
+              reward += (1.0 - time_remaining) * 0.02
+          
+          return float(reward)
+      ```
       
   analysis:
     system: |
